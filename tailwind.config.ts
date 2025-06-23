@@ -4,6 +4,10 @@ export default {
 	plugins: [require("@tailwindcss/typography")],
 	theme: {
 		extend: {
+			colors: {
+				'accent': 'var(--color-accent)',
+				'accent-secondary': 'var(--color-accent-secondary)',
+			},
 			typography: () => ({
 				DEFAULT: {
 					css: {

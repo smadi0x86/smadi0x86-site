@@ -1,0 +1,13 @@
+---
+title: "DMA and Security"
+description: "A thought on Direct Memory Access (DMA) and how high-speed peripherals can bypass CPU-enforced security boundaries."
+publishDate: "2024-11-01T00:00:00Z"
+tags: ["dma", "security", "hardware", "iommu"]
+draft: false
+---
+
+High speed peripherals like network cards and GPUs use DMA to read and write directly to system memory, completely bypassing the CPU. This is great for performance, but it creates a massive security vulnerability. 
+
+A compromised peripheral with DMA capability can potentially read or write any physical memory address ignoring all permissions.
+
+A defense for these attacks are the IOMMU (Input-Output Memory Management Unit), which virtualizes I/O addresses just like the MMU does for the CPU. Without it, your most sensitive kernel data is just one malicious firmware flash away from being exposed.

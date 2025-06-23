@@ -30,5 +30,20 @@ const {
 			<slot />
 		</main>
 		<Footer />
-	</body>
+	<style is:global>
+:root {
+    --color-accent: #dc2626;
+    --color-accent-hover: #b91c1c;
+}
+
+[data-theme="light"],
+[data-theme="dark"] {
+    --color-accent: #dc2626;
+    --color-accent-hover: #b91c1c;
+	--color-accent-secondary: #991b1b;
+    --color-link: var(--color-accent);
+    --color-text-accent: var(--color-accent);
+}
+</style>
+</body>
 </html>

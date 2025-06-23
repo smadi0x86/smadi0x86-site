@@ -1,0 +1,13 @@
+---
+title: "The Native API (ntdll.dll)"
+description: "A brief thought on ntdll.dll and the true syscall interface of the Windows kernel, hidden beneath the Win32 API."
+publishDate: "2024-10-01T00:00:00Z"
+tags: ["windows-internals", "ntapi", "kernel"]
+draft: false
+---
+
+Beneath the Win32 API lies the true interface to the Windows kernel which is the NT Native API exposed by `ntdll.dll`.
+
+Every call to `CreateFileW` in `kernel32.dll` is just a wrapper. It eventually resolves to a call like `NtCreateFile` in `ntdll.dll`, which then executes the `syscall` instruction to transition into kernel mode.
+
+This is super simple, but understanding this separation is super important to system programmers and security researchers on Windows. 

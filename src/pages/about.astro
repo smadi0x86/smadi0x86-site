@@ -2,35 +2,55 @@
 import PageLayout from "@/layouts/Base.astro";
 
 const meta = {
-	description: "I'm a starter theme for Astro.build",
 	title: "About",
 };
 ---
 
 <PageLayout meta={meta}>
-	<h1 class="title mb-6">About</h1>
-	<div class="prose prose-sm prose-cactus max-w-none">
-		<p>
-			Hi, I’m a starter Astro. I’m particularly great for getting you started with your own blogging
-			website.
-		</p>
-		<p>Here are my some of my awesome built in features:</p>
-		<ul class="list-inside list-disc" role="list">
-			<li>I'm ultra fast as I'm a static site</li>
-			<li>I'm fully responsive</li>
-			<li>I come with a light and dark mode</li>
-			<li>I'm easy to customise and add additional content</li>
-			<li>I have Tailwind CSS styling</li>
-			<li>Shiki code syntax highlighting</li>
-			<li>Satori for auto generating OG images for blog posts</li>
-		</ul>
-		<p>
-			Clone or fork my <a
-				class="cactus-link inline-block"
-				href="https://github.com/chrismwilliams/astro-cactus"
-				rel="noreferrer"
-				target="_blank">repo</a
-			> if you like me!
-		</p>
-	</div>
+	<section>
+		<h1 class="title mb-6">About</h1>
+		<div class="prose prose-sm prose-cactus max-w-none prose-h2:text-accent prose-h3:text-accent-secondary prose-a:text-accent">
+			<h2>Professional Experience</h2>
+			<h3>Co-Founder, AuspicesAI | Abu Dhabi, UAE | June 2023 – Present</h3>
+			<ul>
+				<li>Architected and deployed scalable AWS infrastructure using Terraform, reducing deployment time by 30%</li>
+				<li>Designed and implemented GitLab parent-child CI/CD pipelines, improving deployment efficiency by 40%</li>
+				<li>Established AWS Organization with Azure AD integration, enhancing security through AWS Control Tower and SCPs</li>
+				<li>Integrated SonarQube for SAST and code quality checks, increasing code quality by 25% and reducing vulnerabilities by 50%</li>
+				<li>Led the migration to Amazon EKS with Karpenter, Kong Gateway, and Prometheus</li>
+			</ul>
+
+			<h2>Education</h2>
+			<h3>Al Hussein Technical University (HTU) | Amman, Jordan | 2026</h3>
+			<ul>
+				<li>Bachelor's Degree, Cyber Security</li>
+				<li>Dean’s List (2022, 2023)</li>
+				<li>Best Cybersecurity Club Member</li>
+				<li>Top performers and award winners honor</li>
+			</ul>
+
+			<h2>Certifications</h2>
+			<ul>
+				<li>CKA: Certified Kubernetes Administrator (LF-99sgpiy3g7)</li>
+				<li>CKS: Certified Kubernetes Security Specialist (LF-7k89pkn4q0)</li>
+				<li>AWS Certified Solutions Architect Associate (c4f39076992d481898c662255ad698fe)</li>
+			</ul>
+
+			<h2>Skills</h2>
+			<ul>
+				<li>Cloud Technologies: Kubernetes, AWS (EKS, IAM, Control Tower), Terraform, Docker, Kong Gateway</li>
+				<li>Programming Languages: Python, Go, C</li>
+				<li>Security Tools: Falco, Sysdig, AppArmor, Open Policy Agent, SonarQube</li>
+				<li>Monitoring & Logging: Grafana, Prometheus, ELK Stack</li>
+				<li>CI/CD & Version Control: Git, GitLab CI/CD, Pre-commit hooks</li>
+				<li>IAM & Governance: RBAC, SCPs, Azure AD (Entra ID), AWS Organizations</li>
+				<li>Soft Skills: Leadership, Team Management, Problem-Solving, Mentorship</li>
+			</ul>
+
+			<h2>Specialties</h2>
+			<p>
+				Security Engineering, DevSecOps, Malware Analysis, Red Teaming
+			</p>
+		</div>
+	</section>
 </PageLayout>

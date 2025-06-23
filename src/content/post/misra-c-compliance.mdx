@@ -1,0 +1,147 @@
+---
+title: "A Deep Dive into MISRA C Compliance"
+description: "A detailed look at MISRA C standards, their importance in safety-critical systems, and practical code examples to ensure compliance."
+publishDate: "2025-06-23T00:00:00Z"
+tags: ["misra", "c-language", "embedded-systems", "safety-critical"]
+draft: false
+---
+
+## What is MISRA C?
+
+MISRA C is a set of software development guidelines for the C programming language developed by MISRA (Motor Industry Software Reliability Association). Its aims are to facilitate code safety, security, portability and reliability in the context of embedded systems, specifically those systems programmed in ISO C / C90 / C99.
+
+### Why is it Important?
+
+In safety-critical systems, such as those found in automotive, aerospace, and medical devices, software failures can have catastrophic consequences. MISRA C provides a framework for writing C code that is less prone to common errors and vulnerabilities, thereby increasing the overall safety and reliability of the system.
+
+### Rule 10.1: No Inappropriate Essential Type Operands
+
+One of the fundamental rules in MISRA C is to avoid operations on operands of an inappropriate essential type. This rule is designed to prevent errors that can arise from implicit type conversions, which can lead to unexpected behavior and data loss.
+
+For example, performing bitwise operations on floating-point numbers or using non-boolean values in a boolean context is a violation of this rule.
+
+#### Non-Compliant Example
+
+```c
+#include <stdbool.h>
+#include <stdint.h>
+
+void R_10_1_non_compliant(void)
+{
+   bool blc;
+   char cha = 'a';
+   bool bla = true;
+
+   blc = cha && bla;       /* Non-compliant */
+}
+```
+
+In this example, the character `cha` is used in a logical AND operation with a boolean `bla`. This is non-compliant because the essential type of `cha` is not a boolean.
+
+#### Compliant Example
+
+```c
+#include <stdbool.h>
+#include <stdint.h>
+
+void R_10_1_compliant(void)
+{
+   bool blc;
+   char cha = 'a';
+   bool bla = true;
+
+   blc = (cha != 0) && bla;  /* Compliant */
+}
+```
+
+To fix this, we explicitly convert the character to a boolean by checking if it's not equal to 0. This makes the code compliant with MISRA C Rule 10.1.
+
+### Rule 13.2: Unspecified Evaluation Order
+
+A common pitfall in C programming is relying on the order of evaluation of sub-expressions. The C standard does not specify the evaluation order of function arguments or operands in most expressions, which can lead to different behavior on different compilers or even with different optimization settings.
+
+MISRA C Rule 13.2 states that the value of an expression should be the same under all permitted evaluation orders.
+
+#### Non-Compliant Example
+
+```c
+#include <stdint.h>
+
+extern void f(uint16_t, uint16_t);
+
+void R_13_2_non_compliant(void)
+{
+   uint16_t i = 0;
+   f ( i++, i );            /* Non-compliant - order of evaluation unspecified */
+}
+```
+
+In this example, it is unclear whether `i++` or `i` will be evaluated first. This can lead to `f(0, 1)` or `f(1, 1)` being called, depending on the compiler.
+
+#### Compliant Example
+
+```c
+#include <stdint.h>
+
+extern void f(uint16_t, uint16_t);
+
+void R_13_2_compliant(void)
+{
+   uint16_t i = 0;
+   f ( i, i + 1 );          /* Compliant */
+   i = i + 1;
+}
+```
+
+To make the code compliant, we can separate the increment operation from the function call, ensuring a predictable and well-defined order of evaluation.
+
+### Rule 17.7: Use The Return Value of Functions
+
+Functions often return values to indicate success, failure, or a calculated result. Ignoring the return value of a function with a non-void return type can lead to undetected errors and unpredictable program behavior.
+
+MISRA C Rule 17.7 requires that the value returned by a function be used or explicitly cast to `void` to indicate that it is being intentionally ignored.
+
+#### Non-Compliant Example
+
+```c
+#include <stdint.h>
+
+static uint16_t func(uint16_t para1)
+{
+   return para1;
+}
+
+void R_17_7_non_compliant(uint16_t para2)
+{
+    func(para2);            /* Non-Compliant - value discarded */
+}
+```
+
+In this example, the return value of `func` is ignored, which could hide potential issues.
+
+#### Compliant Example
+
+```c
+#include <stdint.h>
+
+static uint16_t func(uint16_t para1)
+{
+   return para1;
+}
+
+void R_17_7_compliant(uint16_t para2)
+{
+    uint16_t x;
+    x = func(para2);       /* Compliant - value is used */
+
+    /* OR */
+
+    (void)func(para2);   /* Compliant - value is explicitly discarded */
+}
+```
+
+To comply with the rule, you can either assign the return value to a variable or explicitly cast it to `(void)` to show that you are intentionally ignoring it.
+
+## Conclusion
+
+Adhering to MISRA C guidelines is a crucial step toward producing safe, reliable, and secure software for critical systems. While it may seem restrictive at first, following these rules helps prevent common C programming pitfalls, leading to more robust and maintainable code. The rules discussed here are just a small sample, but they highlight the kind of discipline that MISRA C promotes.
