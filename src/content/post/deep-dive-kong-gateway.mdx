@@ -1,0 +1,252 @@
+---
+title: "The Power of Kong Gateway"
+description: "A deep dive into Kong Gateway, exploring its architecture, and how to solve common challenges with custom plugins for logging, token exchange, and mTLS."
+publishDate: "2024-06-24"
+tags: ["Kong", "API Gateway", "Lua", "Plugins", "mTLS", "OAuth2", "SAML"]
+draft: false
+---
+
+## Introduction to Kong
+
+Kong is a powerful, lightweight, and flexible open-source API Gateway built on top of NGINX with the OpenResty framework. This architecture provides a high-performance gateway with low latency and a small memory footprint. Kong acts as an intermediary for all your API traffic, allowing you to implement policies, secure your services, and gain observability into your APIs.
+
+### Core Components
+
+At its core, Kong's configuration consists of a few key entities:
+
+*   **Services**: Represent your upstream APIs.
+*   **Routes**: Define how requests are sent to Services. A Route specifies rules to match client requests.
+*   **Consumers**: Represent the clients or users of your APIs. You can associate credentials and plugins with consumers.
+*   **Plugins**: These are the heart of Kong's flexibility. Plugins are Lua modules that can be configured to run during the request/response lifecycle. They allow you to add a wide range of functionalities like authentication, rate-limiting, logging, and transformations.
+
+### Persistence
+
+Kong can be run in two main modes:
+
+*   **With a database**: Using PostgreSQL or Cassandra (deprecated), which is required for features like the Kong Manager UI, Developer Portal, and RBAC in the Enterprise Edition.
+*   **DB-less**: Where the configuration is declared in a YAML or JSON file. This is ideal for CI/CD pipelines and immutable infrastructure.
+
+## Solving Real-World Challenges with Kong Plugins
+
+The true power of Kong lies in its extensibility. Let's explore how to solve some complex, real-world problems by creating custom Kong plugins.
+
+### 1. Overcoming Log Size Limitations with Log Chunking
+
+**The Problem:**
+
+Have you ever noticed your Kong logs being truncated? This isn't a bug in your logging system, but a limitation of the underlying NGINX architecture, which has a hardcoded limit on the length of log messages (4096 bytes in OpenResty). This can be a major issue when you need detailed logs for debugging, especially with large headers or bodies.
+
+**The Solution:**
+
+The solution is to implement "log chunking" – a method of breaking down large log messages into smaller pieces. Instead of adding this logic to every single plugin or serverless function, we can create a global Lua utility module.
+
+This utility module can be required by any plugin and used to wrap logging calls. It checks the message length and, if it exceeds the limit, splits it into multiple chunks, each with metadata like a chunk ID and index, making it possible to reassemble them later.
+
+Here is a practical implementation of the `chunk_utils.lua` module:
+
+**`kong/plugins/log-chunker/chunk_utils.lua`**
+```lua
+local cjson = require "cjson"
+
+local chunker = {}
+
+local function get_uuid()
+  local f = io.open("/proc/sys/kernel/random/uuid", "r")
+  if f ~= nil then
+    local uuid = f:read("*a")
+    f:close()
+    return uuid:gsub("\n", "")
+  end
+  return nil
+end
+
+function chunker.logChunks(log_function, ...)
+  local args = {...}
+  local message = table.concat(args, " ")
+  local max_len = 4000 -- Stay safely below the 4096 limit
+
+  if string.len(message) <= max_len then
+    log_function(message)
+    return
+  end
+
+  local chunk_id = get_uuid()
+  local total_chunks = math.ceil(string.len(message) / max_len)
+
+  for i = 1, total_chunks do
+    local start_pos = (i - 1) * max_len + 1
+    local end_pos = i * max_len
+    local chunk_content = string.sub(message, start_pos, end_pos)
+
+    local chunk_meta = {
+      chunk_id = chunk_id,
+      chunk_index = i,
+      total_chunks = total_chunks,
+      chunk_data = chunk_content
+    }
+    log_function(cjson.encode(chunk_meta))
+  end
+end
+
+return chunker
+```
+
+To use this, you would update your `kong.conf`:
+
+```ini
+lua_package_path = /path/to/your/custom_plugins/?.lua;;
+plugins = bundled,log-chunker
+```
+
+Then, in any other custom plugin, you can use it like this:
+
+```lua
+-- inside another plugin's log phase
+local chunker = require "kong.plugins.log-chunker.chunk_utils"
+local large_body = kong.request.get_raw_body()
+chunker.logChunks(kong.log.err, "Request body was: ", large_body)
+```
+
+### 2. Advanced Token Exchange: On-Behalf-Of (OBO) and SAML Bearer Assertion
+
+Modern microservice architectures often involve complex authentication and authorization scenarios where one service needs to call another on behalf of a user.
+
+#### On-Behalf-Of (OBO) Flow
+
+**The Problem:**
+
+A service receives a JWT access token from a client, but needs to call a downstream service that requires a different token format (e.g., a SAML token) while preserving the original user's identity. The standard OAuth 2.0 flows don't cover this delegation scenario directly.
+
+**The Solution:**
+
+We can implement the On-Behalf-Of flow using a custom Kong plugin. Here’s a skeleton of what the plugin's `access` phase could look like:
+
+**`kong/plugins/obo-token-exchange/handler.lua`**
+```lua
+local BasePlugin = require "kong.plugins.base_plugin"
+local http = require "resty.http"
+
+local OboHandler = BasePlugin:extend()
+
+function OboHandler:new()
+  OboHandler.super.new(self, "obo-token-exchange")
+end
+
+function OboHandler:access(conf)
+  OboHandler.super.access(self)
+
+  local auth_header = kong.request.get_header("Authorization")
+  if not auth_header or not auth_header:match("^Bearer (.+)") then
+    return kong.response.exit(401, { message = "No bearer token found" })
+  end
+
+  local incoming_token = auth_header:match("^Bearer (.+)")
+
+  local httpc = http.new()
+  local res, err = httpc:request_uri(conf.token_endpoint, {
+    method = "POST",
+    headers = {
+      ["Content-Type"] = "application/x-www-form-urlencoded"
+    },
+    body = string.format(
+      "grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&client_id=%s&client_secret=%s&assertion=%s&scope=%s&requested_token_use=on_behalf_of",
+      conf.client_id, conf.client_secret, incoming_token, conf.scope
+    )
+  })
+
+  if not res or res.status >= 400 then
+    return kong.response.exit(500, { message = "Failed to exchange token", error = err or res.body })
+  end
+
+  -- The new token is in res.body (assuming JSON response)
+  -- Replace the original Authorization header
+  local json_body = cjson.decode(res.body)
+  kong.service.request.set_header("Authorization", "Bearer " .. json_body.access_token)
+end
+
+return OboHandler
+```
+
+And here is how you would configure the plugin on a service:
+
+```yaml
+- name: obo-token-exchange
+  config:
+    token_endpoint: https://login.microsoftonline.com/YOUR_TENANT_ID/oauth2/v2.0/token
+    client_id: YOUR_CLIENT_ID
+    client_secret: YOUR_CLIENT_SECRET
+    scope: "https://graph.microsoft.com/.default"
+```
+
+#### SAML 2.0 Bearer Assertion Flow
+
+**The Problem:**
+
+Building on the previous scenario, what if you need to integrate with a system like SAP that requires an access token from its own authorization server, and that server only accepts a SAML 2.0 Bearer Assertion for the token exchange? This creates a two-step token exchange process.
+
+**The Solution:**
+
+We can chain two custom plugins together:
+
+1.  **OBO Plugin**: Takes the initial JWT and exchanges it for a SAML 2.0 token from the primary identity provider (like Entra ID).
+2.  **SAML 2.0 Bearer Assertion Plugin**: This new plugin runs after the OBO plugin. It takes the SAML 2.0 token from the `Authorization` header and uses it to call the second authorization server (e.g., SAP) to get the final access token.
+
+This powerful combination allows for seamless integration between systems with different authentication requirements, all handled transparently at the gateway.
+
+### 3. mTLS with a TLS-Terminating Reverse Proxy (TTRP)
+
+**The Problem:**
+
+Mutual TLS (mTLS) is a great way to secure communication by requiring both the client and server to present certificates. Kong's `mtls-auth` plugin can authenticate consumers based on their client certificate. However, in many production environments, you have a load balancer or a WAF in front of Kong that terminates the TLS connection. This breaks the mTLS flow because the original client certificate never reaches Kong.
+
+**The Solution:**
+
+Modern TTRPs (like Google Cloud Load Balancer) can be configured to pass client certificate information in HTTP headers. A common header is `X-Client-Cert-DNSName-SANs`, which contains the Subject Alternative Names from the client's certificate.
+
+We can create a custom `mtls-header` plugin that runs before the standard authentication plugins. This plugin reads the SAN value from a request header and uses Kong's internal API to find a matching consumer.
+
+**`kong/plugins/mtls-header/handler.lua`**
+```lua
+local BasePlugin = require "kong.plugins.base_plugin"
+
+local MtlsHeaderHandler = BasePlugin:extend()
+MtlsHeaderHandler.PRIORITY = 1001 -- Higher than the 'mtls-auth' plugin
+
+function MtlsHeaderHandler:new()
+  MtlsHeaderHandler.super.new(self, "mtls-header")
+end
+
+function MtlsHeaderHandler:access(conf)
+  MtlsHeaderHandler.super.access(self)
+
+  local san_header = kong.request.get_header(conf.san_header_name)
+  if not san_header then
+    return
+  end
+
+  -- Find the credential in the database
+  local credential, err = kong.db.mtls_auth_credentials.find_one_by_san_name(san_header)
+  if err or not credential then
+    return kong.response.exit(403, { message = "SAN not found or invalid." })
+  end
+
+  -- Credential found, identify the consumer
+  local consumer, err = kong.db.consumers.select({ id = credential.consumer.id })
+  if err or not consumer then
+    return kong.response.exit(500, { message = "Could not find consumer for credential." })
+  end
+
+  kong.client.authenticate(consumer, credential)
+end
+
+return MtlsHeaderHandler
+```
+
+**Plugin Configuration:**
+
+```yaml
+- name: mtls-header
+  config:
+    san_header_name: "X-Client-Cert-DNSName-SANs"
+```
+This configuration tells the plugin to look for the client's SAN in the `X-Client-Cert-DNSName-SANs` header, which is a common practice for load balancers like Google Cloud Load Balancer.
