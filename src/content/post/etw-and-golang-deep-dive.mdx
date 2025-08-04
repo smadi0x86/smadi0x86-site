@@ -1,0 +1,112 @@
+---
+title: "A look into ETW and Go"
+description: "Unlock the power of Event Tracing for Windows (ETW) with Go. A technical guide to monitoring system events, from process creation to network connections, using the golang-etw library."
+publishDate: "2025-02-12T00:00:00Z"
+tags: ["etw", "golang", "windows", "security", "monitoring"]
+draft: false
+---
+
+## The Unseen Power of ETW
+
+Event Tracing for Windows (ETW) is one of the most powerful and underutilized features of the Windows operating system. It's a kernel-level tracing facility that provides a high-speed, low-overhead way to log events from both kernel and user-space applications. Security products, performance monitors, and debuggers all rely on ETW for their data, and with the right tools, so can you.
+
+At a high level, the ETW architecture consists of three main components:
+
+-   **Providers:** These are the applications, drivers, or kernel components that generate event data. Windows has hundreds of built-in providers, such as the `Microsoft-Windows-Kernel-Process` provider, which logs events related to process and thread creation.
+-   **Consumers:** These are applications that listen for and process the events. A consumer subscribes to one or more provider events through a tracing session.
+-   **Sessions:** A tracing session is the intermediary that connects providers to consumers. A controller starts a session, enables the desired providers for that session, and then a consumer can connect to the session to receive the events.
+
+## Bringing ETW to Go
+
+Traditionally, interacting with ETW required C/C++ and the complex Windows API. However, the `golang-etw` library provides a pure Go implementation for consuming ETW events, making it accessible without needing to resort to CGO.
+
+Let's dive into a practical example of how to build a simple monitoring tool that uses `golang-etw` to subscribe to process creation events.
+
+### Setting Up the ETW Consumer
+
+Our goal is to create a Go program that prints information about every new process that starts on the system. To do this, we'll subscribe to the `Microsoft-Windows-Kernel-Process` provider.
+
+Here is the initial setup for our consumer. This code creates a real-time ETW session and enables the kernel process provider.
+
+```go
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+	"os/signal"
+	"syscall"
+
+	"github.com/0xrawsec/golang-etw/etw"
+)
+
+func main() {
+	// Create a new real-time ETW session.
+	// The session name "GolangETWTrace" is arbitrary.
+	session, err := etw.NewRealTimeSession("GolangETWTrace")
+	if err != nil {
+		panic(fmt.Sprintf("Failed to create ETW session: %s", err))
+	}
+	defer session.Stop()
+
+	// Enable the Microsoft-Windows-Kernel-Process provider for our session.
+	// This provider is well-known and logs events for process creation, termination, etc.
+	// The GUID can be found using tools like `logman query providers`.
+	provider := etw.MustParseProvider("Microsoft-Windows-Kernel-Process")
+	if err := session.EnableProvider(provider); err != nil {
+		panic(fmt.Sprintf("Failed to enable provider: %s", err))
+	}
+
+	fmt.Println("ETW session started. Waiting for process events...")
+
+		// Create a consumer and subscribe it to our session.
+	consumer := etw.NewRealTimeConsumer(context.Background())
+	defer consumer.Stop()
+
+	consumer.FromSessions(session)
+
+	// Start a goroutine to process events from the consumer's channel.
+	go func() {
+		for e := range consumer.Events {
+			// We are only interested in the "Process/Start" event.
+			// The event ID for process creation is 1.
+			if e.Header.EventDescriptor.Id == 1 {
+				// e.Properties is a map[string]any that holds the event data.
+				// We can access the fields by name.
+				processID := e.Properties["ProcessID"]
+				imageFileName := e.Properties["ImageFileName"]
+				commandLine := e.Properties["CommandLine"]
+
+				fmt.Printf("Process Created:\n")
+				fmt.Printf("\tPID: %v\n", processID)
+				fmt.Printf("\tImage: %s\n", imageFileName)
+				fmt.Printf("\tCommandLine: %s\n\n", commandLine)
+			}
+		}
+	}()
+
+	// Start the consumer. This is a blocking call, so we'll run it in the main goroutine.
+	if err := consumer.Start(); err != nil {
+		panic(fmt.Sprintf("Failed to start consumer: %s", err))
+	}
+
+	// Wait for a signal to exit.
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	<-sigChan
+}
+```
+
+### Parsing the Event Data
+
+While dumping the raw JSON of an event is useful for debugging, it's not very readable. The real power comes from parsing the event's properties. The `golang-etw` library conveniently places all of an event's data into the `Properties` map on the `etw.Event` struct.
+
+The code above has been modified to extract the `ProcessID`, `ImageFileName`, and `CommandLine` from the event properties and print them in a much more human-readable format. This demonstrates how you can easily build custom logic around specific event data to create powerful monitoring and security tools.
+
+## Conclusion
+
+Event Tracing for Windows is a powerful tool for anyone serious about system monitoring, performance analysis, or security on the Windows platform. By leveraging the `golang-etw` library, you can tap into this rich stream of data from the comfort and safety of Go. We've only scratched the surface by looking at process creation, but the same principles apply to monitoring network connections, file I/O, registry access, and much more. The possibilities are vast, and you now have the foundational knowledge to start building your own powerful ETW-based tools in Go.
+
+Credits goes to [0xrawsec golang-etw project](https://github.com/0xrawsec/golang-etw).

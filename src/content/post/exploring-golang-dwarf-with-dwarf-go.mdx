@@ -1,0 +1,49 @@
+---
+title: "Analyzing Golang Type Information with DWARF-Go"
+description: "A look at a practical tool, DWARF-Go, for analyzing the custom DWARF debugging information embedded in Golang executables."
+publishDate: "2025-05-24"
+tags: ["Golang", "DWARF", "Reverse Engineering", "Tooling"]
+draft: false
+---
+
+If you've ever delved into the internals of a Golang binary, you may have encountered DWARF, the debugging data format that maps the compiled code back to the original source. However, Go has its own way of doing things, emitting custom DWARF attributes that can leave standard tools like `readelf` scratching their heads.
+
+## The Challenge with Go's DWARF Debug Information
+
+Go binaries embed rich type information using custom DWARF attributes like `DW_AT_go_kind` and `DW_AT_go_elem`. These attributes describe Go-specific types such as maps, channels, functions, and interfaces. While incredibly useful, they are not part of the standard DWARF specification. As a result, when you analyze a Go binary with a tool like `readelf`, you'll often see these fields marked as `"Unknown AT value"`, leaving you in the dark.
+
+This is where `DWARF-Go` comes in.
+
+## DWARF-Go: Making Sense of Go Types
+
+`DWARF-Go` is a C tool designed specifically to parse and analyze this custom Golang DWARF information. Instead of just showing you the raw, unknown attributes, it processes the output of `readelf` to generate meaningful statistics about the Go types used in the binary.
+
+This provides reverse engineers and developers with a high-level summary of how often different Go kinds (like `map`, `chan`, `func`) appear and in which DWARF tags they are found. It's a simple yet powerful way to get a quick overview of a binary's structure from the perspective of its type data.
+
+## How to Use DWARF-Go
+
+Using the tool is straightforward. First, you need to compile it:
+
+```bash
+gcc dwarf-go-stats.cc -o dwarf-go -Wall
+```
+
+Next, you generate the DWARF info from your Go binary using `readelf` and pipe it to a text file:
+
+```bash
+readelf --debug-dump=info your-go-binary > output.txt
+```
+
+Finally, you run `dwarf-go` on the generated output file:
+
+```bash
+./dwarf-go output.txt
+```
+
+The tool will then print a summary of the Go type statistics it found.
+
+## Conclusion
+
+`DWARF-Go` is a great example of a purpose-built tool that solves a very specific problem. By focusing on Go's custom DWARF attributes, it provides valuable insights that are otherwise difficult to obtain with standard debugging tools. For anyone working on the reverse engineering or static analysis of Golang binaries, it's a handy utility to have in your toolkit.
+
+Check out the project and try it for yourself on the [DWARF-Go GitHub repository](https://github.com/smadi0x86/DWARF-Go).

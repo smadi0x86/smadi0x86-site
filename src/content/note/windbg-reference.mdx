@@ -1,0 +1,25 @@
+---
+title: "WinDbg Quick Reference"
+description: "Essential WinDbg commands for debugging."
+publishDate: "2025-04-08T00:00:00Z"
+tags: ["windbg", "debugging", "windows"]
+draft: false
+---
+
+**Setup:** `.symfix` → `.reload` to configure symbols
+
+**Analysis:** `!analyze -v` for crashes, `k`/`kb`/`kv` for call stack
+
+**Memory:** `dd`/`dq`/`db` to inspect, `u `\<address\> to disassemble, `s -a` to search
+
+**Structures:** `dt ntdll!_PEB` or modern `dx @$peb`
+
+**Modules:** `lmf` to list loaded modules
+
+**Threads:** `~` to list, `~`\<id\>`s` to switch
+
+**Breakpoints:** `bp`/`bu` to set, `bl` to list, `bc` to clear
+
+**Execution:** `t` step into, `p` step over, `g` continue
+
+**System:** `!handle`, `!heap -s`, `!teb` for internals, `r` for registers
