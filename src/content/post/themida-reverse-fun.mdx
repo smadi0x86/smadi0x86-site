@@ -1,0 +1,266 @@
+---
+title: "Themida Reverse Fun"
+description: "A collection of themida packed binaries reverse engineering writeups."
+publishDate: "2025-08-06T00:00:00Z"
+tags: ["reverse-engineering", "themida", "security"]
+draft: false
+---
+
+All of these challenges was packed by the commercial themida packer, for more information about it you can check out [Themida Overview](https://www.oreans.com/Themida.php).
+
+The challenges are:
+
+- [UnCrackable](#uncrackable)
+- [Casp3rTheGhost](#casp3rtheghost)
+- [Note](#note)
+
+## UnCrackable
+
+This challenge had 0 solves until the last minute, I got its first blood the last hour of the competition, although it wasn't that hard but it was a bit tricky, so here is the writeup.
+
+### Challenge Overview
+
+When first examining the binary with Detect It Easy (DIE), the application didn’t immediately appear to be a .NET executable.
+
+but when i checked its imports i found mscoree.dll which is a crucial file for the .NET Framework, specifically acting as the runtime execution engine for managed code.
+
+<img src="/images/uncrackable/uncrackable-1.png" alt="" />
+
+From here I knew what I'll exactly do, ill run the binary for now and then instantly try to unpack it with a themida .net unpacker and even if it didnt reconstruct imports i can do it manually...
+
+<img src="/images/uncrackable/uncrackable-2.png" alt="" />
+
+When running the binary at first it gives you a string that can be decrypted to:
+
+<img src="/images/uncrackable/uncrackable-3.png" alt="" />
+
+What first comes to mind is to find a similar string that when decrypted by the program will give the flag...
+
+### Unpacking the Binary
+
+I loaded the binary in x32dbg and it was a pain to trace and wasted me a good amount of time trying to bypass `CheckRemoteDebuggerPresent()` anti-debug (scylla-hide didn't work for some reason, probably a 32 bit issue), so i decided to look for [Themida-Unpacker-for-.NET](https://github.com/cg10036/Themida-Unpacker-for-.NET).
+
+Its worth noting that i wasted time breaking on `GetModuleHandleA`, `GetProcAddress`... imports as they are used to resolve dynamic apis so i can dump the unpacked binary at runtime
+
+```c
+1. GetModuleHandleA("kernel32.dll")  // Getting base APIs
+
+2. GetProcAddress() for VirtualProtect()  // Preparing to unpack
+
+3. GetModuleHandleA("mscoree.dll")   // .NET runtime
+
+4. Memory writes to unpack the .NET assembly
+
+5. GetModuleHandleA("advapi32.dll")  // For CryptoAPI
+```
+
+but the issue was for some reason bypassing anti debug wasn't successful, this is just a fail i would love to mention...
+
+<img src="/images/uncrackable/uncrackable-4.png" alt="" />
+
+This unpacker outputs all dumped dlls (imports) resolved and reconstruct the PE accordingly `UNCRACKABLE_protected_exe_PID8338_UNCRACKABLE_protected.exe_400000_x86.exe`
+
+Now if i try to run this new dumped binary to detect it easy, it will instantly identify it as a .net binary
+
+<img src="/images/uncrackable/uncrackable-5.png" alt="" />
+
+### Deobfuscating the Binary
+
+Now if we load it in a .net decompiler, we will see these unreadable garbage which is caused by agile .net obfuscator, so we need to deobfuscate it.
+
+<img src="/images/uncrackable/uncrackable-6.png" alt="" />
+
+I used [AgileDotNetSlayer](https://github.com/SychicBoy/AgileDotNetSlayer) to deobfuscate the agile obfuscated strings
+
+After the binary is deobfuscated from the agile obfuscation, we can take a closer look into what is happening
+
+<img src="/images/uncrackable/uncrackable-7.png" alt="" />
+
+### Analyzing the Code
+
+At this point the challenge is almost solved, so lets analyze the code:
+
+```csharp
+public class Form1 : Form
+{
+    private TextBox $\u$200b$\u$000a;
+    private Label $\u$200b$\u$000d;
+    private Button $\u$200b ;
+
+
+    private void $\u$200b$\u$1680()
+
+    {
+        // ... UI initialization code ...
+
+        // same string that gave us "seriously ?!!!"
+
+        $\u$200b$\u$000a.Text = "Vf7jRjdvebvLtzL2V1DY57xNAdFb1fwQEssdXJI8fjk4YRcUinl7qnh8yhm7zV6L";
+
+        // Label showing "Flag:"
+
+        $\u$200b$\u$000d.Text = "Flag:";
+
+        // Button labeled "Decrypt me"
+
+        $\u$200b .Text = "Decrypt me";
+
+        $\u$200b .Click += $\u$200b$\u$00a0;
+    }
+}
+```
+
+The button click handler contained what appeared to be the main decryption logic
+
+```csharp
+private void $\u$200b$\u$00a0(object sender, EventArgs e)
+
+{
+    string keyString = "f9QzA7wL1kP6rMbD8YcN2zWvJ4XhVsTy";
+
+    string ivString = "A1b2C3d4E5f6G7h8";
+
+    byte[] bytes = AesPInvokeDecryptor.Decrypt("RBpjBfdNNXfv24T2hi8Cqw==", keyString, ivString);
+
+    MessageBox.Show(Encoding.UTF8.GetString(bytes));
+}
+```
+
+I decrypted this hardcoded string:
+
+```csharp
+from Crypto.Cipher import AES
+from Crypto.Util.Padding import unpad
+import base64
+
+encrypted_b64 = "RBpjBfdNNXfv24T2hi8Cqw=="
+key = "f9QzA7wL1kP6rMbD8YcN2zWvJ4XhVsTy".encode('utf-8')
+iv = "A1b2C3d4E5f6G7h8".encode('utf-8')
+
+encrypted = base64.b64decode(encrypted_b64)
+
+cipher = AES.new(key, AES.MODE_CBC, iv)
+
+decrypted = unpad(cipher.decrypt(encrypted), AES.block_size)
+
+print(decrypted.decode('utf-8'))
+
+# Output: "seriously ?!!!"
+```
+
+I didn't expect that, but then i realized what about the text string that appeared when we executed the binary... so i tried:
+
+```csharp
+from Crypto.Cipher import AES
+from Crypto.Util.Padding import unpad
+import base64
+
+# text box value
+encrypted_b64 = "Vf7jRjdvebvLtzL2V1DY57xNAdFb1fwQEssdXJI8fjk4YRcUinl7qnh8yhm7zV6L"
+key = "f9QzA7wL1kP6rMbD8YcN2zWvJ4XhVsTy".encode('utf-8')
+iv = "A1b2C3d4E5f6G7h8".encode('utf-8')
+
+encrypted = base64.b64decode(encrypted_b64)
+
+cipher = AES.new(key, AES.MODE_CBC, iv)
+
+decrypted = unpad(cipher.decrypt(encrypted), AES.block_size)
+
+flag = decrypted.decode('utf-8')
+
+print(f"Flag: {flag}")
+
+# Output: Flag: NCSC{f4d6fc5933efbc7bbf04e948546098cb}
+```
+
+That worked! actual flag was in the 64 character string in the text box! Using the same AES key and IV from the button handler.
+
+## Casp3rTheGhost
+
+### Challenge Overview
+
+As usual starting with Detect It Easy (DIE) to gather information about the binary, it was packed with Themida and it was a 64 bit executable.
+
+<img src="/images/Casp3rTheGhost/cas1.png" alt="" />
+
+Now we have information that its a C/C++ binary compiled with msvc, a 64 bit one and packed with Themida.
+
+For further analysis, I loaded it into PE-Bear to check the imports and exports.
+
+<img src="/images/Casp3rTheGhost/cas2.png" alt="" />
+
+### Unpacking the Binary
+
+At first, i decided to load it into x64dbg and just run it normally, I used ScyllaHide to bypass the anti-debugging checks of themida.
+
+<img src="/images/Casp3rTheGhost/cas3.png" alt="" />
+
+### How does themida work?
+
+Themida replaces the PE header entry point with its own loader stub, storing the Original Entry Point (OEP) offset internally, at runtime the stub decrypts/unpacks the original code into memory, resolves imports, and restores the process state then redirects execution, typically with a direct jmp or other control transfer to the calculated absolute OEP address (ImageBase + OEP) so the program resumes as if it had been loaded normally.
+
+So first thing that came to my mind is to get the original entry point, I used [unlicense](https://github.com/ergrelet/unlicense) which is a dynamic unpacker for themida/winlicense protected binaries and it uses frida internally, so I ran it against the binary and it found OEP but failed to reconstruct the imports.
+
+You probably thought, what if unlicense failed to get us the OEP too?
+
+The most known way to tackle such cases is by using x64dbg and Scylla. The classic pathway was described many years ago in the series of tutorials [Unpacking with Antracene](https://forum.tuts4you.com/files/file/2040-unpacking-with-anthracene/). This method requires opening the main executable under the debugger, setting appropriate breakpoints and following the execution till it hits the Original Entry Point (OEP). After we found the OEP, we dump the unpacked version of the PE from memory, then fix the dump by searching and reconstructing the IAT. The details of what breakpoints to set, and how the execution should be followed depend on the specific packer. In some cases, the stub may contain some anti-debug measures that have to be defeated additionally.
+
+For tracing the execution and getting OEP manually, you can use [TinyTracer](https://github.com/hasherezade/tiny_tracer) and [HollowsHunter](https://github.com/hasherezade/hollows_hunter) for dumping and reconstructing the IAT.
+
+<img src="/images/Casp3rTheGhost/cas4.png" alt="" />
+
+### x64dbg Analysis
+
+Luckily for us, unlicense found the OEP for us, so now we need to load the binary into x64dbg, hardware break on the OEP address and use scylla to IAT autosearch and get imports then dump and fix the dumped binary.
+
+Starting by setting a hardware breakpoint on the OEP address using `bph <OEP address>` command, then run the binary.
+
+<img src="/images/Casp3rTheGhost/cas5.png" alt="" />
+
+If you're wondering why I didnt use a normal breakpoint, well I tried and it didn't work, why? Because hardware breakpoints dont modify the code in memory so themida integrity checks designed to detect patched instructions like the `0xCC` from a normal breakpoint found nothing suspicious, themida either wasn’t checking the debug registers at that point or only runs those checks in specific routines, so the breakpoint triggered before any hardware breakpoint detection occurred, allowing scylla to dump successfully the unpacked binary.
+
+<img src="/images/Casp3rTheGhost/cas6.png" alt="" />
+
+After loading the fixed dump in IDA Pro, I located the flag string at address `0x1400020e4`, referenced by function `sub_140001070`.
+
+<img src="/images/Casp3rTheGhost/cas7.png" alt="" />
+
+## Note
+
+### Challenge Overview
+
+This challenge was a 32 bit binary packed with themida, it was similar to the unpacking of [UnCrackable](#uncrackable) challenge, so I won't go into details of unpacking it, its fairly simple using [Themida-Unpacker-for-.NET](https://github.com/cg10036/Themida-Unpacker-for-.NET).
+
+<img src="/images/Note/note1.png" alt="" />
+
+<img src="/images/Note/note2.png" alt="" />
+
+### Analyzing the Code
+
+After unpacking it, I loaded the unpacked binary into ILSpy and decompiled it, the code was obfuscated with Agile .NET obfuscator so I also used [AgileDotNetSlayer](https://github.com/SychicBoy/AgileDotNetSlayer).
+
+<img src="/images/Note/note3.png" alt="" />
+
+After deobfuscating the code, I found a base64-like string, i decided to decode it and I found that its a rar file that has a flag.txt file inside it.
+
+<img src="/images/Note/note4.png" alt="" />
+
+So I did a simple python script to export this as a rar file:
+
+```python
+import base64
+
+base64_string = "UmFyIRoHAQAzkrXlCgEFBgAFAQGAgABbpmONVQIDPMAABKYAIFoIuVuAAwAIRmxhZy50eHQwAQADD+5TyknYt2g1Mg8D/WEHpuHAP29x35uUiEAIJ42my3smG5JyEHPnw1gZudIQCgMCAGEflt/92wGHp/SA/FMu30sSxIPBQ4dbb7n0iKdmrRsGXMdZo5UTwCDqdTZKxe3aSd+dp28CVgrNd6lcMwG+l2eaLluPjhK2HXdWUQMFBAA="
+
+rar_bytes = base64.b64decode(base64_string)
+with open("flag.rar", "wb") as f:
+    f.write(rar_bytes)
+```
+
+The rar was protected with a password, so I used john the ripper to crack it, the password was fairly simple `5201314`.
+
+After extracting the flag.txt file, I found the flag inside it:
+
+```
+NCSC{0h_y0u_607_my_5up3r_53cr37_n073!}
+```
