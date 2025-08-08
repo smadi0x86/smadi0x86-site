@@ -1,0 +1,117 @@
+---
+title: "Windows NTDLL.dll Protected Policies"
+description: "Exploring Protected Policies in NTDLL.dll"
+publishDate: "2025-08-08T00:00:00Z"
+tags: ["ntdll.dll", "windows internals", "reverse engineering"]
+draft: false
+---
+
+## Introduction
+
+From windows 10 major release 2015 (1507/RTM), ntdll.dll got a new security feature called ProtectedPolicies, this is not documented in any way by microsoft but is exposed indirectly via `RtlQueryProtectedPolicy` API.
+
+To make it short, these policies are runtime security toggles that are identified by GUIDs and control the behaviour and mitigation features in windows runtime. Windows DLLs such as kernel32.dll, advapi32.dll etc... query these policies to enforce certain security rules, detect malicious patterns or even apply compatability shims.
+
+For more information about compatability shims, you can refer to [Demystifying Shims Documentation](https://techcommunity.microsoft.com/blog/askperf/demystifying-shims---or---using-the-app-compat-toolkit-to-make-your-old-stuff-wo/374947).
+
+## How does it work?
+
+The `RtlQueryProtectedPolicy` is the main entry point in ntdll.dll, the structure of the function is as follows:
+
+```c
+NTSTATUS NTAPI RtlQueryProtectedPolicy(
+    _In_ PGUID PolicyGuid,
+    _Out_ PULONG_PTR PolicyValue
+);
+```
+
+From user mode, you can also call [QueryProtectedPolicy](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-queryprotectedpolicy) in KernelBase.dll, which is just a thin wrapper around `RtlQueryProtectedPolicy`.
+
+So basically when you call `RtlQueryProtectedPolicy` or the wrapper `QueryProtectedPolicy`, you pass it:
+
+- A GUID identifying the specific policy you want to check.
+- A pointer to a ULONG_PTR variable (PolicyValue) where the result will be stored.
+
+Simply, you give Windows a policy’s GUID and if it exists, it returns the current value of that policy, which can be either enabled or disabled.
+
+## Internal Layout
+
+The internal layout of the protected policies is not documented, but we can mention some details from reverse engineering the ntdll.dll.
+
+Internally, ntdll.dll maintains a list of:
+
+- **RtlpProtectedPolicies**: This is a pointer to an array of policy entries.
+- **RtlpProtectedPoliciesActiveCount**: This is the number of active entries in the policy list.
+- **\_RtlpProtectedPoliciesSRWLock**: This is a synchronization primitive protecting the table.
+
+On x86 each entry is `0x14` bytes long and on x86-64 its `0x18` bytes due to alignment of the structure.
+
+```c
+typedef struct _PROTECTED_POLICY_ENTRY {
+    GUID  PolicyGuid; // 16 bytes
+    DWORD Flag;       // 0 or 1
+#if defined(_WIN64)
+    DWORD Padding;    // alignment to 8 bytes
+#endif
+} PROTECTED_POLICY_ENTRY, *PPROTECTED_POLICY_ENTRY;
+```
+
+## Querying Policies
+
+To query a policy, the `RtlQueryProtectedPolicy` function performs the following steps from the disassembly:
+
+```asm
+mov     edi, offset _RtlpProtectedPoliciesSRWLock
+push    edi
+call    _RtlAcquireSRWLockShared@4
+
+push    offset _RtlpSearchProtectedPolicyEntry ; compare function
+push    14h                                    ; size of element
+push    ds:_RtlpProtectedPoliciesActiveCount   ; number of elements
+push    ds:_RtlpProtectedPolicies              ; base pointer
+push    [ebp+Key]                              ; requested GUID
+call    _bsearch
+```
+
+To summarize, it acquires the [SRW lock in shared mode](https://learn.microsoft.com/en-us/windows/win32/sync/slim-reader-writer--srw--locks) then performs a binary search (bsearch) over the sorted array using `_RtlpSearchProtectedPolicyEntry`, if a GUID matching found it copies the flag into the output parameter and releases the lock returning either `STATUS_SUCCESS` or `STATUS_NOT_FOUND`.
+
+## Example Callers and GUIDs
+
+From a quick cross-reference of `RtlQueryProtectedPolicy` in `ntdll.dll`, `kernel32.dll`, and `KernelBase.dll`, we can get several built-in policies:
+
+| DLL / Function                            | GUID                                     | Purpose                                                    |
+| ----------------------------------------- | ---------------------------------------- | ---------------------------------------------------------- |
+| `ntdll!RtlpAddVectoredHandler`            | `{1FC98BCA-1BA9-4397-93F9-349EAD41E057}` | Possibly restricts certain vectored handler registrations. |
+| `ntdll!RtlGuardCheckLongJumpTarget`       | `{4F6AE3A6-8B1B-4623-A293-294CD743BBD1}` | Controls CFG / `longjmp` validation behavior.              |
+| `kernel32!CheckForReadOnlyResourceFilter` | `{739C343A-F3E1-4ED8-AC66-8435FEB7C5A5}` | Governs writeability checks for resource sections.         |
+| `KernelBase!QueryProtectedPolicy`         | (varies)                                 | Public wrapper for user-mode queries.                      |
+
+The GUIDs are hard coded in these routines and the result flag determines if the policy is enabled or disabled.
+
+## Latest Windows 11 Analysis
+
+Since this information is from windows 10 major release 2015 (1507/RTM), I decided to check the latest Windows 11 (24H2) and see how policies are loaded and queried.
+
+I attached windbg to chrome.exe and found the following:
+
+The analysis found that RtlQueryProtectedPolicy is exported at address 0x00007ffb87b1a910, along with several related internal structures including RtlpProtectedPolicies (the main policy array), RtlpProtectedPoliciesActiveCount (showing 0 active policies), and RtlSetProtectedPolicy for registering new policies.
+
+<img src="/images/win-ntdll-protectedpolicies/1.png" alt="" />
+
+The most significant finding is that the policy array at RtlpProtectedPolicies is completely zeroed out, with both the active count and total count showing 0, explaining why all policy queries return STATUS_NOT_FOUND (0xC0000225). The memory search for known policy GUIDs (CFG, Vectored Handler, and Resource Conversion) yielded no results, confirming these policies aren’t pre-loaded in the process memory space.
+
+<img src="/images/win-ntdll-protectedpolicies/2.png" alt="" />
+
+Analysis of RtlSetProtectedPolicy reveals it’s tightly integrated with Control Flow Guard (CFG) enforcement, calling LdrControlFlowGuardEnforced multiple times during execution. The function also manages a special heap (LdrpMrdataHeap) with memory protection features, using SRW locks for thread safety and RtlProtectHeap/LdrProtectMrdata for security. This suggests Protected Policies are part of Windows runtime security infrastructure, dynamically registered only when specific security features are activated rather than being statically initialized at process startup.
+
+<img src="/images/win-ntdll-protectedpolicies/3.png" alt="" />
+
+For real world example of Vectored Exception Handler Injector Beacon Object File that uses the ntdll!RtlpAddVectoredHandler (GUID: `{1FC98BCA-1BA9-4397-93F9-349EAD41E057}`) you can check https://gist.github.com/rxwx/fec434dd551eb57390833b7e029a61b1
+
+<img src="/images/win-ntdll-protectedpolicies/4.png" alt="" />
+
+## Why does it matter?
+
+While not officially documented, ProtectedPolicies reveal how Microsoft is quietly embedding process level feature flags deep in the Windows runtime, they let the OS dynamically adjust security behavior per process without recompiling code.
+
+This is useful for exploit development, reverse engineers and security researchers as it lets them know when certain mitigations are active or not and can help in operational security and avoid loaders crashing or failing due to unexpected policy states.
