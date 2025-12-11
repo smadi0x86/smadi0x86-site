@@ -2,7 +2,8 @@
 title: "Sigma way of securing your container runtimes"
 description: "A detailed technical guide to achieving multi-layered container runtime security in Kubernetes using Falco for threat detection, and gVisor and AppArmor for proactive hardening."
 publishDate: "2024-11-13T00:00:00Z"
-tags: ["kubernetes", "security", "falco", "gvisor", "apparmor", "runtime-security"]
+tags:
+  ["kubernetes", "security", "falco", "gvisor", "apparmor", "runtime-security"]
 draft: false
 ---
 
@@ -48,14 +49,14 @@ gVisor integrates with Kubernetes via the `RuntimeClass` resource. A `RuntimeCla
     spec:
       runtimeClassName: gvisor
       containers:
-      - name: nginx
-        image: nginx
+        - name: nginx
+          image: nginx
     ```
 
 **Pros and Cons of gVisor**
 
-*   **Pros:** Provides a very strong isolation boundary, significantly reducing the risk of kernel exploits.
-*   **Cons:** There is a performance overhead due to the syscall interception and handling in user space. This makes gVisor ideal for running untrusted or high-risk workloads, but it may not be suitable for high-performance, I/O-intensive applications like databases.
+- **Pros:** Provides a very strong isolation boundary, significantly reducing the risk of kernel exploits.
+- **Cons:** There is a performance overhead due to the syscall interception and handling in user space. This makes gVisor ideal for running untrusted or high-risk workloads, but it may not be suitable for high-performance, I/O-intensive applications like databases.
 
 ### AppArmor: Mandatory Access Control for Linux
 
@@ -99,13 +100,13 @@ Using AppArmor in Kubernetes is a two-step process: you must first load the prof
       name: hello-apparmor
     spec:
       containers:
-      - name: hello
-        image: busybox:1.28
-        command: [ "sh", "-c", "echo 'Hello AppArmor!' && sleep 1h" ]
-        securityContext:
-          appArmorProfile:
-            type: Localhost
-            localhostProfile: k8s-deny-write
+        - name: hello
+          image: busybox:1.28
+          command: ["sh", "-c", "echo 'Hello AppArmor!' && sleep 1h"]
+          securityContext:
+            appArmorProfile:
+              type: Localhost
+              localhostProfile: k8s-deny-write
     ```
 
 3.  **Verify the Enforcement:** If you deploy this pod and then try to write a file from within the container, the operation will fail.
@@ -155,9 +156,9 @@ The power of Falco lies in its rules. Let's look at a classic example: detecting
   source: syscall
 ```
 
-*   **`condition`**: This is the core logic. It triggers if an `execve` syscall is made (`evt.type = execve`) from within a container (`container.id != host`) to execute the `bash` program (`proc.name = bash`).
-*   **`output`**: This is the format of the alert message, which is enriched with useful context like the Kubernetes namespace, pod name, and container image.
-*   **`priority`**: The severity of the alert.
+- **`condition`**: This is the core logic. It triggers if an `execve` syscall is made (`evt.type = execve`) from within a container (`container.id != host`) to execute the `bash` program (`proc.name = bash`).
+- **`output`**: This is the format of the alert message, which is enriched with useful context like the Kubernetes namespace, pod name, and container image.
+- **`priority`**: The severity of the alert.
 
 If an attacker were to `kubectl exec` into a running pod and start a shell, Falco would immediately generate an alert like this:
 
@@ -166,11 +167,3 @@ If an attacker were to `kubectl exec` into a running pod and start a shell, Falc
 ```
 
 This real-time visibility is invaluable for incident response.
-
-## Conclusion: Defense-in-Depth
-
-By combining these three technologies, we create a formidable, multi-layered security posture for our Kubernetes workloads:
-
-1.  **gVisor:** Provides a strong, sandboxed isolation boundary for high-risk applications, protecting the host kernel from direct attack.
-2.  **AppArmor:** Enforces fine-grained mandatory access control on all applications, limiting their actions to only what is necessary and preventing them from accessing sensitive resources.
-3.  **Falco:** Acts as a vigilant security camera, monitoring all system activity in real-time and instantly alerting on any suspicious behavior that might indicate a breach.

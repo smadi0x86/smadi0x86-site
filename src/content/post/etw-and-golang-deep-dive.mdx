@@ -6,15 +6,15 @@ tags: ["etw", "golang", "windows", "security", "monitoring"]
 draft: false
 ---
 
-## The Unseen Power of ETW
+## Power of ETW
 
 Event Tracing for Windows (ETW) is one of the most powerful and underutilized features of the Windows operating system. It's a kernel-level tracing facility that provides a high-speed, low-overhead way to log events from both kernel and user-space applications. Security products, performance monitors, and debuggers all rely on ETW for their data, and with the right tools, so can you.
 
 At a high level, the ETW architecture consists of three main components:
 
--   **Providers:** These are the applications, drivers, or kernel components that generate event data. Windows has hundreds of built-in providers, such as the `Microsoft-Windows-Kernel-Process` provider, which logs events related to process and thread creation.
--   **Consumers:** These are applications that listen for and process the events. A consumer subscribes to one or more provider events through a tracing session.
--   **Sessions:** A tracing session is the intermediary that connects providers to consumers. A controller starts a session, enables the desired providers for that session, and then a consumer can connect to the session to receive the events.
+- **Providers:** These are the applications, drivers, or kernel components that generate event data. Windows has hundreds of built-in providers, such as the `Microsoft-Windows-Kernel-Process` provider, which logs events related to process and thread creation.
+- **Consumers:** These are applications that listen for and process the events. A consumer subscribes to one or more provider events through a tracing session.
+- **Sessions:** A tracing session is the intermediary that connects providers to consumers. A controller starts a session, enables the desired providers for that session, and then a consumer can connect to the session to receive the events.
 
 ## Bringing ETW to Go
 

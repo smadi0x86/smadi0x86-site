@@ -2,7 +2,16 @@
 title: "The Kubernetes Gateway API"
 description: "A deep dive into the Kubernetes Gateway API, its role-oriented design, and how the GAMMA initiative is extending it to create a single, unified API for both north-south ingress and east-west service mesh traffic."
 publishDate: "2025-01-20T00:00:00Z"
-tags: ["kubernetes", "gateway-api", "service-mesh", "gamma", "networking", "istio", "linkerd"]
+tags:
+  [
+    "kubernetes",
+    "gateway-api",
+    "service-mesh",
+    "gamma",
+    "networking",
+    "istio",
+    "linkerd",
+  ]
 draft: false
 ---
 
@@ -44,15 +53,15 @@ metadata:
 spec:
   gatewayClassName: my-gateway-class
   listeners:
-  - name: http
-    protocol: HTTP
-    port: 80
-    allowedRoutes:
-      namespaces:
-        from: Selector
-        selector:
-          matchLabels:
-            expose-via-gateway: "true"
+    - name: http
+      protocol: HTTP
+      port: 80
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels:
+              expose-via-gateway: "true"
 ---
 # 3. HTTPRoute (Managed by Application Developer)
 apiVersion: gateway.networking.k8s.io/v1
@@ -64,20 +73,20 @@ metadata:
     expose-via-gateway: "true"
 spec:
   parentRefs:
-  - name: my-gateway
-    namespace: infra-ns
+    - name: my-gateway
+      namespace: infra-ns
   hostnames: ["app.example.com"]
   rules:
-  - matches:
-    - path:
-        type: PathPrefix
-        value: /api
-    backendRefs:
-    - name: my-app-service
-      port: 8080
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /api
+      backendRefs:
+        - name: my-app-service
+          port: 8080
 ```
 
-## The GAMMA Initiative: Extending Gateway API to the Service Mesh
+## The GAMMA Initiative
 
 The real game-changer is the **GAMMA initiative**. Its goal is to extend the elegant model of the Gateway API to manage east-west (service-to-service) traffic, effectively creating a unified configuration plane for both ingress controllers and service meshes.
 
@@ -97,28 +106,28 @@ metadata:
   namespace: my-app
 spec:
   parentRefs:
-  - group: ""
-    kind: Service
-    name: my-service
-    port: 8080
+    - group: ""
+      kind: Service
+      name: my-service
+      port: 8080
   rules:
-  - backendRefs:
-    - name: my-service-v1
-      port: 8080
-      weight: 90
-    - name: my-service-v2-canary
-      port: 8080
-      weight: 10
+    - backendRefs:
+        - name: my-service-v1
+          port: 8080
+          weight: 90
+        - name: my-service-v2-canary
+          port: 8080
+          weight: 10
 ```
 
 In this example, any pod in the mesh that calls `my-service.my-app.svc.cluster.local:8080` will have its traffic automatically split by the mesh's data plane according to the weights defined in the `HTTPRoute`. No ingress gateway is involved. This replaces the need for mesh-specific CRDs like Istio's `VirtualService` or Linkerd's `HTTPRoute` (from the SMI spec), consolidating everything under the official Kubernetes Gateway API.
 
 ## The Future of Kubernetes Networking
 
-The combination of ingress and service mesh configuration under a single, expressive, and official Kubernetes API is a watershed moment for the ecosystem. 
+The combination of ingress and service mesh configuration under a single, expressive, and official Kubernetes API is a watershed moment for the ecosystem.
 
 It promises:
 
--   **Portability**: With conformance profiles, an `HTTPRoute` that works on Istio will work the same way on Linkerd or Kuma.
--   **Simplicity**: Developers only need to learn one API for all traffic management.
--   **Clear Roles**: The separation of concerns between infrastructure and application teams is preserved and clarified.
+- **Portability**: With conformance profiles, an `HTTPRoute` that works on Istio will work the same way on Linkerd or Kuma.
+- **Simplicity**: Developers only need to learn one API for all traffic management.
+- **Clear Roles**: The separation of concerns between infrastructure and application teams is preserved and clarified.

@@ -1,0 +1,135 @@
+---
+title: "Finding Hidden Executable Pages in the Linux Kernel"
+description: "A look on how to uncover hidden executable pages in the Linux kernel."
+publishDate: "2025-12-11"
+tags: ["Linux", "Kernel", "Reverse Engineering", "Rootkits"]
+draft: false
+---
+
+So we will be looking at how to find hidden executable pages in the Linux kernel. The method we will be using will focus on cross-scanning Page Table Entries (PTEs) for memory regions that lack the NX (No-Execute) bit, then subtracting pages that legitimately belong to Linux Kernel Modules (LKMs). The remaining target are the hidden executable memory pages, which are often used by rootkits to hide their code from standard kernel memory listings.
+
+## 5 Levels of "Fun"
+
+Let’s start with the basics. If we check the kernel config:
+
+```bash
+cat /boot/config-$(uname -r) | grep -E 'X86_5LEVEL|PGTABLE_LEVELS'
+# CONFIG_PGTABLE_LEVELS=5
+# CONFIG_X86_5LEVEL=y
+```
+
+My kernel claims to use 5 levels of paging, which corresponds to the hardware specifications for 57-bit virtual addressing (la57).
+
+The math for a virtual address breakdown looks like this:
+
+- pte_t (PTE): 9 bits (Page Table)
+- pmd_t (PMD): 9 bits (Page Directory)
+- pud_t (PUD): 9 bits (Page Upper Directory)
+- p4d_t (P4D): 9 bits (Level 4 Page Directory)
+- pgd_t (PGD): 9 bits (Page Global Directory)
+- Offset: 12 bits (4096 bytes page size)
+
+**Total** = 12 + (5 x 9) = 57 bits
+
+It’s genuinely amazing how different OS architectures handle the same hardware.
+
+## Windows vs Linux
+
+In Windows, memory management feels almost... cheating. All PTEs are located in a huge, contiguous, sparse array. If you have a virtual address addr1, getting its PTE is a simple function call away: `MiGetPteAddress(addr1)`.
+
+You can recurse this logic (get the PTE of the PTE) to traverse all levels. Even better, you can use this in reverse to skip scanning huge empty areas.
+
+### Linux Chooses Violence
+
+In Linux, PTEs are not stored in a contiguous array. To find a physical page, we must manually walk the tree starting from the top-level (PGD) and traverse down to the leaves.
+
+The root of the `pgd_t` is stored in `init_mm->pgd`.
+
+**Note:** As you might guess, `init_mm` is not an exported symbol.
+
+Linux is widely known for the consistency, completeness, and backward-compatibility of its API, and for being developer-friendly in general. (I'm lying)
+
+## Walking Tables
+
+To walk the tree, we need a reliable sequence of checks. We can't just dereference pointers blindly. For every level (pXX), the standard traversal dance looks like this:
+
+1. `pXX_none()`: Is it empty?
+
+2. `pXX_leaf()`: Is this a large page (leaf node at a high level)? Side note: `pXX_leaf` is actually a great name for this.
+
+3. `pXX_bad()`: Is the entry corrupted/invalid?
+
+4. `pXX_offset()`: Get the address for the next level.
+
+### The Banger Problem
+
+Just when you think you have a traversal loop, `CONFIG_HUGETLB_PAGE` enters the chat.
+
+```bash
+grep 'HUGETLB_PAGE' /boot/config-$(uname -r)
+# CONFIG_HUGETLB_PAGE=y
+```
+
+If we encounter a HugeTLB page, the standard walk breaks. We need to check if a PMD or PUD is huge.
+
+- **Expectation:** Call `pmd_huge()` or `pud_huge()`.
+
+- **Reality:** These functions are not exported.
+
+- **Bonus:** `p4d_huge` and `pgd_huge` are often just dumb macros that return 0, depending on the architecture.
+
+## NX Bit Chaos
+
+Once we finally reach a valid page, we need to check if it is executable. You might assume there is a standard flag for "Executable." You would be wrong. This is heavily hardware-dependent and inconsistently named across architectures:
+
+- Arc: `_PAGE_EXECUTE`
+- Aarch64: `_PAGE_KERNEL_EXEC`
+- PowerPC: `_PAGE_EXEC`
+- s390: `_PAGE_NOEXEC`
+
+Consequently, some architectures provide `pte_exec()`, others provide `pte_no_exec()`.
+
+There are virtually no analogs for checking executability on upper-level pages (PUD/PMD). If you encounter a huge executable page, good luck verifying its NX bit standardly without writing arch-specific bitmask hacks.
+
+## The "5" Lie
+
+We found earlier that `CONFIG_PGTABLE_LEVELS=5`. However, let's look at the actual hardware capability:
+
+```bash
+grep address /proc/cpuinfo
+# address sizes : 39 bits physical, 48 bits virtual
+```
+
+My hardware only supports 48-bit virtual addresses. This requires only 4 levels of paging. The kernel is configured for 5, but the hardware demands 4.
+
+### How does Linux sweep this trash under the carpet?
+
+It uses a trick called Page Table Folding.
+
+When the hardware doesn't support the full depth, the kernel "folds" the unnecessary levels into each other. You can spot the smoking gun in the shift values:
+
+- page_size: 1000 (hex) -> 12 bits
+- pgd_shift: 39
+- p4d_shift: 39
+- pud_shift: 30
+- pmd_shift: 21
+
+Notice that pgd_shift (39) and p4d_shift (39) are identical.
+
+In a true 5-level system, the PGD would shift by 48 bits. Here, the PGD and P4D are effectively the same level logically. The code might call `p4d_offset(pgd)`, but strictly speaking, it’s a no-op that returns the same address, collapsing the search space to match the 48-bit hardware reality.
+
+## Ready?
+
+To implement this rootkit scanner, your LKM needs to:
+
+1. Brute-force/kallsyms your way to `init_mm`.
+
+2. Implement the walker manually, handling the 4 vs 5 level folding logic (which usually handles itself via macros, but be careful with pointer arithmetic).
+
+3. Bypass the missing symbols for HugeTLB checks (perhaps by copying the logic of `pmd_huge` from the kernel source directly into your module).
+
+4. Bitwise-check the raw PTE values for the NX bit (usually bit 63 on `x86_64`) because the helper macros are inconsistent.
+
+5. Compare the found executable ranges against the loaded module list (lines in `/proc/modules` or the internal modules list).
+
+Happy hunting.
